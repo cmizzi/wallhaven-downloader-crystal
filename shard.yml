@@ -1,0 +1,19 @@
+name: wallhaven-downloader
+version: 0.1.0
+
+authors:
+  - Cyril Mizzi <cyril@lesiteimmo.com>
+
+targets:
+  wallhaven-downloader:
+    main: src/wallhaven-downloader.cr
+
+dependencies:
+  admiral:
+    github: jwaldrip/admiral.cr
+  crystagiri:
+    github: madeindjs/crystagiri
+
+crystal: 1.1.1
+
+license: MIT
