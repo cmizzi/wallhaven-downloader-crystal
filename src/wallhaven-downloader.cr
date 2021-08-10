@@ -2,6 +2,7 @@ require "http/client"
 require "log"
 require "admiral"
 require "crystagiri"
+require "./rate-limiter"
 
 Log.setup("", :debug)
 
@@ -23,34 +24,34 @@ module Wallhaven::Downloader
     @seed = Random::Secure.urlsafe_base64(5)
 
     # Really simple rate limiter. This will just allow us to send only 1 req/s to prevent being 429.
-    @next_request_at : Int64 = Time.utc.to_unix
+    @rate_limiter = RateLimiter.new 1, 1.second
 
+    # Main command loop.
     def run
       page = 1u32
       wallpapers = [] of String
 
       loop do
         # Start fetching the first page and count the number of wallpapers in there.
-        response = self.request(URI.new "https", "wallhaven.cc", path: "/search", query: URI::Params.encode self.build_query_params(page))
-
-        parser = Crystagiri::HTML.new response.body
+        parser = self.request_and_parse(URI.new "https", "wallhaven.cc", path: "/search", query: URI::Params.encode self.build_query_params(page))
         parser.css("a.preview") do |tag|
           # Check first we have enough wallpapers. If we have enough, we don't need to parse every other wallpapers.
           next if wallpapers.size >= flags.limit
 
-          # Fetch the wallpaper.
-          wallpaper_response = self.request tag.node.attributes["href"].content
-          wallpaper_parser = Crystagiri::HTML.new wallpaper_response.body
+          # Fetch the wallpaper and parse the HTML.
+          parser = self.request_and_parse tag.node.attributes["href"].content
 
-          wallpaper = wallpaper_parser.at_id("wallpaper").not_nil!.node.attributes["src"].content
+          # We know the original wallpaper is stored at #wallpaper id.
+          wallpaper = parser.at_id("wallpaper").not_nil!.node.attributes["src"].content
           wallpaper_name = Path.posix(wallpaper).basename
 
           # The wallpaper already exist. Let's skip it.
           if File.exists?(Path.new(arguments.output, wallpaper_name))
-            puts "Oops, the wallpaper \"#{wallpaper_name}\" already exists. Skip it."
+            Log.info { "Oops, the wallpaper \"#{wallpaper_name}\" already exists. Skip it." }
             next
           end
 
+          # Push the current wallpaper (detail URL) into the array.
           wallpapers.push wallpaper
         end
 
@@ -61,13 +62,9 @@ module Wallhaven::Downloader
         break if wallpapers.size >= flags.limit
       end
 
-      wallpapers = wallpapers[0..flags.limit - 1]
-
       # Now, we can loop on every wallpapers and ensure we download them into the right directory.
       wallpapers.each do |wallpaper|
-        response = self.request wallpaper
-
-        File.write(Path.new(arguments.output, Path.posix(wallpaper).basename), response.body)
+        File.write(Path.new(arguments.output, Path.posix(wallpaper).basename), self.request(wallpaper).body)
         Log.info { "Wallpaper \"#{Path.posix(wallpaper).basename}\" has been downloaded successfully." }
       end
     end
@@ -85,32 +82,30 @@ module Wallhaven::Downloader
       }
     end
 
-    # Execute a request to an HTTP endpoint.
+    # Execute a request to a HTTP endpoint (URI).
     def request(uri : URI)
-      loop do
-        # Define the rate limit. If the timer is not reached, we cannot do any request, we just have to wait.
-        if @next_request_at > Time.utc.to_unix
-          sleep 100.milliseconds
-          next
-        end
-
-        break
-      end
-
+      @rate_limiter.wait()
       response = HTTP::Client.get(uri)
-      @next_request_at = Time.utc.shift(seconds: 2).to_unix
 
       Log.debug { "#{uri} (#{response.status_code})" }
+      raise "Oops, Wallhaven returned a status code \"#{response.status_code}\"." if response.status_code != 200
 
-      if response.status_code != 200
-        raise "Oops, Wallhaven returned a status code \"#{response.status_code}\"."
-      end
-
-      return response
+      response
     end
 
+    # Execute a request to a HTTP endpoint (string).
     def request(uri : String)
-      return self.request URI.parse uri
+      self.request URI.parse uri
+    end
+
+    # Execute a request to a HTTP endpoint and parse the responded HTML.
+    def request_and_parse(uri : URI)
+      Crystagiri::HTML.new self.request(uri).body
+    end
+
+    # Execute a request to a HTTP endpoint and parse the responded HTML.
+    def request_and_parse(uri : String)
+      Crystagiri::HTML.new self.request(uri).body
     end
   end
 end
