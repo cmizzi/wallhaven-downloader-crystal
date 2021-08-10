@@ -21,9 +21,7 @@ module Wallhaven::Downloader
 
     # Wait until the limiter is free.
     def wait
-      loop do
-        break unless self.should_wait?
-
+      while self.should_wait?
         # Define the rate limit. If the timer is not reached, we cannot do any request, we just have to wait.
         sleep 100.milliseconds
       end

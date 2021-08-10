@@ -31,7 +31,7 @@ module Wallhaven::Downloader
       page = 1u32
       wallpapers = [] of String
 
-      loop do
+      until wallpapers.size >= flags.limit
         # Start fetching the first page and count the number of wallpapers in there.
         parser = self.request_and_parse(URI.new "https", "wallhaven.cc", path: "/search", query: URI::Params.encode self.build_query_params(page))
         parser.css("a.preview") do |tag|
@@ -56,10 +56,8 @@ module Wallhaven::Downloader
         end
 
         # Filter out any duplicate.
-        wallpapers = wallpapers.uniq()
-
+        wallpapers = wallpapers.uniq
         page = page + 1
-        break if wallpapers.size >= flags.limit
       end
 
       # Now, we can loop on every wallpapers and ensure we download them into the right directory.
@@ -73,18 +71,18 @@ module Wallhaven::Downloader
     def build_query_params(page : UInt32)
       return {
         "categories": flags.categories,
-        "purity": flags.purity,
-        "atleast": flags.resolutions,
-        "sorting": flags.sorting,
-        "direction": flags.direction,
-        "seed": @seed,
-        "page": "#{page}"
+        "purity":     flags.purity,
+        "atleast":    flags.resolutions,
+        "sorting":    flags.sorting,
+        "direction":  flags.direction,
+        "seed":       @seed,
+        "page":       "#{page}",
       }
     end
 
     # Execute a request to a HTTP endpoint (URI).
     def request(uri : URI)
-      @rate_limiter.wait()
+      @rate_limiter.wait
       response = HTTP::Client.get(uri)
 
       Log.debug { "#{uri} (#{response.status_code})" }
@@ -99,12 +97,7 @@ module Wallhaven::Downloader
     end
 
     # Execute a request to a HTTP endpoint and parse the responded HTML.
-    def request_and_parse(uri : URI)
-      Crystagiri::HTML.new self.request(uri).body
-    end
-
-    # Execute a request to a HTTP endpoint and parse the responded HTML.
-    def request_and_parse(uri : String)
+    def request_and_parse(uri : URI | String)
       Crystagiri::HTML.new self.request(uri).body
     end
   end
